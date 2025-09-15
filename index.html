@@ -299,7 +299,7 @@
     <div class="container">
         <div class="header">
             <h1>📱 Bulk Barcode Scanner</h1>
-            <p>Scan or manually add barcodes to your list</p>
+            <p>Supports QR codes, UPC, EAN, Code128, Code39, PDF417, DataMatrix & more!</p>
         </div>
 
         <div class="scanner-section">
@@ -533,8 +533,31 @@
                 startCameraBtn.disabled = true;
                 stopCameraBtn.disabled = false;
                 
-                // Initialize barcode reader with better settings
-                codeReader = new ZXing.BrowserMultiFormatReader();
+                // Initialize barcode reader with all supported formats
+                const hints = new Map();
+                const formats = [
+                    ZXing.BarcodeFormat.QR_CODE,
+                    ZXing.BarcodeFormat.DATA_MATRIX,
+                    ZXing.BarcodeFormat.UPC_E,
+                    ZXing.BarcodeFormat.UPC_A,
+                    ZXing.BarcodeFormat.EAN_8,
+                    ZXing.BarcodeFormat.EAN_13,
+                    ZXing.BarcodeFormat.CODE_128,
+                    ZXing.BarcodeFormat.CODE_39,
+                    ZXing.BarcodeFormat.CODE_93,
+                    ZXing.BarcodeFormat.CODABAR,
+                    ZXing.BarcodeFormat.ITF,
+                    ZXing.BarcodeFormat.RSS_14,
+                    ZXing.BarcodeFormat.RSS_EXPANDED,
+                    ZXing.BarcodeFormat.PDF_417,
+                    ZXing.BarcodeFormat.AZTEC,
+                    ZXing.BarcodeFormat.MAXICODE
+                ];
+                
+                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                
+                codeReader = new ZXing.BrowserMultiFormatReader(hints);
                 
                 showStatus('Camera active - tap screen to focus, point at barcode', 'scanning');
                 
