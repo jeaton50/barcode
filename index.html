@@ -51,11 +51,10 @@
         .camera-container {
             position: relative;
             width: 100%;
-            height: 250px;
-            background: #f8f9fa;
+            height: 300px;
+            background: #000;
             border-radius: 15px;
             overflow: hidden;
-            border: 2px dashed #ddd;
             margin-bottom: 20px;
         }
 
@@ -63,42 +62,107 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
+            display: none;
         }
 
-        .camera-overlay {
+        .camera-placeholder {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #666;
+            color: #ccc;
             text-align: center;
             z-index: 1;
         }
 
-        .scan-btn {
-            width: 100%;
+        .scan-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 100px;
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+            z-index: 2;
+            display: none;
+        }
+
+        .scan-overlay::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #00ff00;
+            animation: scan-line 2s linear infinite;
+        }
+
+        @keyframes scan-line {
+            0% { top: 0; }
+            100% { top: calc(100% - 2px); }
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            flex: 1;
             padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
             border: none;
             border-radius: 12px;
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
-            margin-bottom: 20px;
         }
 
-        .scan-btn:hover {
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #333;
+            border: 2px solid #ddd;
+        }
+
+        .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
         }
 
-        .scan-btn:disabled {
+        .btn:disabled {
             background: #ccc;
             cursor: not-allowed;
             transform: none;
-            box-shadow: none;
+        }
+
+        .manual-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .manual-input input {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .manual-input button {
+            padding: 12px 20px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
         }
 
         .status {
@@ -142,10 +206,23 @@
             font-size: 18px;
         }
 
-        .clear-btn {
-            padding: 8px 16px;
-            background: #ff5722;
+        .list-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .counter {
+            background: #667eea;
             color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .clear-btn, .export-btn {
+            padding: 8px 12px;
             border: none;
             border-radius: 8px;
             font-size: 12px;
@@ -153,9 +230,14 @@
             transition: all 0.3s ease;
         }
 
-        .clear-btn:hover {
-            background: #d84315;
-            transform: translateY(-1px);
+        .clear-btn {
+            background: #ff5722;
+            color: white;
+        }
+
+        .export-btn {
+            background: #2196f3;
+            color: white;
         }
 
         .barcode-item {
@@ -185,6 +267,7 @@
             color: #333;
             font-size: 16px;
             margin-bottom: 5px;
+            word-break: break-all;
         }
 
         .barcode-time {
@@ -204,25 +287,11 @@
             font-size: 14px;
         }
 
-        .delete-btn:hover {
-            background: #d84315;
-            transform: scale(1.1);
-        }
-
         .empty-state {
             text-align: center;
             color: #666;
             font-style: italic;
             padding: 40px 20px;
-        }
-
-        .counter {
-            background: #667eea;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: bold;
         }
     </style>
 </head>
@@ -230,19 +299,28 @@
     <div class="container">
         <div class="header">
             <h1>📱 Bulk Barcode Scanner</h1>
-            <p>Scan multiple barcodes and build your list</p>
+            <p>Scan or manually add barcodes to your list</p>
         </div>
 
         <div class="scanner-section">
             <div class="camera-container">
-                <video id="video" autoplay playsinline></video>
-                <div class="camera-overlay" id="cameraOverlay">
+                <video id="video" autoplay playsinline muted></video>
+                <div class="camera-placeholder" id="cameraPlaceholder">
                     <div style="font-size: 48px; margin-bottom: 10px;">📷</div>
                     <div>Camera will appear here</div>
                 </div>
+                <div class="scan-overlay" id="scanOverlay"></div>
             </div>
 
-            <button id="scanBtn" class="scan-btn">Start Scanning</button>
+            <div class="control-buttons">
+                <button id="startCameraBtn" class="btn btn-primary">Start Camera</button>
+                <button id="stopCameraBtn" class="btn btn-secondary" disabled>Stop Camera</button>
+            </div>
+
+            <div class="manual-input">
+                <input type="text" id="manualInput" placeholder="Enter barcode manually..." />
+                <button id="addManualBtn">Add</button>
+            </div>
             
             <div id="status" class="status" style="display: none;"></div>
         </div>
@@ -250,32 +328,40 @@
         <div class="barcode-list">
             <div class="list-header">
                 <h3>Scanned Barcodes</h3>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div class="list-actions">
                     <span class="counter" id="counter">0</span>
-                    <button id="clearBtn" class="clear-btn">Clear All</button>
+                    <button id="exportBtn" class="export-btn">Export</button>
+                    <button id="clearBtn" class="clear-btn">Clear</button>
                 </div>
             </div>
             
             <div id="barcodeList">
                 <div class="empty-state">
-                    No barcodes scanned yet. Start scanning to build your list!
+                    No barcodes added yet. Use the camera or manual input to build your list!
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-library/0.18.6/zxing-library.min.js"></script>
     <script>
         let isScanning = false;
         let barcodes = [];
+        let stream = null;
+        let codeReader = null;
 
         const video = document.getElementById('video');
-        const scanBtn = document.getElementById('scanBtn');
+        const startCameraBtn = document.getElementById('startCameraBtn');
+        const stopCameraBtn = document.getElementById('stopCameraBtn');
         const statusDiv = document.getElementById('status');
         const barcodeList = document.getElementById('barcodeList');
         const clearBtn = document.getElementById('clearBtn');
+        const exportBtn = document.getElementById('exportBtn');
         const counter = document.getElementById('counter');
-        const cameraOverlay = document.getElementById('cameraOverlay');
+        const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+        const scanOverlay = document.getElementById('scanOverlay');
+        const manualInput = document.getElementById('manualInput');
+        const addManualBtn = document.getElementById('addManualBtn');
 
         function showStatus(message, type) {
             statusDiv.textContent = message;
@@ -294,6 +380,9 @@
         }
 
         function addBarcode(code) {
+            code = code.trim();
+            if (!code) return;
+
             // Check for duplicates
             if (barcodes.some(item => item.code === code)) {
                 showStatus('Barcode already exists in list', 'error');
@@ -305,7 +394,7 @@
                 timestamp: new Date()
             };
 
-            barcodes.unshift(barcode); // Add to beginning
+            barcodes.unshift(barcode);
             renderBarcodeList();
             updateCounter();
             showStatus('Barcode added successfully!', 'success');
@@ -314,6 +403,9 @@
             if (navigator.vibrate) {
                 navigator.vibrate(100);
             }
+
+            // Clear manual input
+            manualInput.value = '';
         }
 
         function deleteBarcode(index) {
@@ -331,11 +423,31 @@
             }
         }
 
+        function exportBarcodes() {
+            if (barcodes.length === 0) {
+                showStatus('No barcodes to export', 'error');
+                return;
+            }
+
+            const csvContent = 'Barcode,Timestamp\n' + 
+                barcodes.map(b => `"${b.code}","${b.timestamp.toISOString()}"`).join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `barcodes_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            
+            showStatus('Barcodes exported successfully!', 'success');
+        }
+
         function renderBarcodeList() {
             if (barcodes.length === 0) {
                 barcodeList.innerHTML = `
                     <div class="empty-state">
-                        No barcodes scanned yet. Start scanning to build your list!
+                        No barcodes added yet. Use the camera or manual input to build your list!
                     </div>
                 `;
                 return;
@@ -352,82 +464,101 @@
             `).join('');
         }
 
-        function startScanning() {
-            if (isScanning) {
-                stopScanning();
-                return;
-            }
-
-            showStatus('Initializing camera...', 'scanning');
-
-            Quagga.init({
-                inputStream: {
-                    name: "Live",
-                    type: "LiveStream",
-                    target: video,
-                    constraints: {
-                        width: 320,
-                        height: 240,
-                        facingMode: "environment"
+        async function startCamera() {
+            try {
+                showStatus('Starting camera...', 'scanning');
+                
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
                     }
-                },
-                decoder: {
-                    readers: [
-                        "code_128_reader",
-                        "ean_reader",
-                        "ean_8_reader",
-                        "code_39_reader",
-                        "code_39_vin_reader",
-                        "codabar_reader",
-                        "upc_reader",
-                        "upc_e_reader"
-                    ]
-                },
-                locate: true
-            }, function(err) {
-                if (err) {
-                    console.log(err);
-                    showStatus('Camera access failed. Please allow camera permissions.', 'error');
-                    return;
-                }
-
-                console.log("Initialization finished. Ready to start");
-                Quagga.start();
-                isScanning = true;
-                scanBtn.textContent = 'Stop Scanning';
-                cameraOverlay.style.display = 'none';
-                showStatus('Scanning active - point camera at barcode', 'scanning');
-            });
-
-            Quagga.onDetected(function(result) {
-                const code = result.codeResult.code;
-                console.log("Barcode detected:", code);
-                addBarcode(code);
-            });
+                });
+                
+                video.srcObject = stream;
+                video.style.display = 'block';
+                cameraPlaceholder.style.display = 'none';
+                scanOverlay.style.display = 'block';
+                
+                startCameraBtn.disabled = true;
+                stopCameraBtn.disabled = false;
+                
+                // Initialize barcode reader
+                codeReader = new ZXing.BrowserMultiFormatReader();
+                
+                showStatus('Camera active - point at barcode', 'scanning');
+                
+                // Start scanning
+                codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
+                    if (result) {
+                        console.log('Barcode detected:', result.text);
+                        addBarcode(result.text);
+                    }
+                    if (err && !(err instanceof ZXing.NotFoundException)) {
+                        console.error('Decode error:', err);
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Camera error:', error);
+                showStatus('Camera access failed. Please allow camera permissions.', 'error');
+            }
         }
 
-        function stopScanning() {
-            if (isScanning) {
-                Quagga.stop();
-                isScanning = false;
-                scanBtn.textContent = 'Start Scanning';
-                cameraOverlay.style.display = 'block';
-                statusDiv.style.display = 'none';
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
             }
+            
+            if (codeReader) {
+                codeReader.reset();
+                codeReader = null;
+            }
+            
+            video.style.display = 'none';
+            cameraPlaceholder.style.display = 'block';
+            scanOverlay.style.display = 'none';
+            
+            startCameraBtn.disabled = false;
+            stopCameraBtn.disabled = true;
+            
+            statusDiv.style.display = 'none';
+            showStatus('Camera stopped', 'success');
         }
 
         // Event listeners
-        scanBtn.addEventListener('click', startScanning);
+        startCameraBtn.addEventListener('click', startCamera);
+        stopCameraBtn.addEventListener('click', stopCamera);
         clearBtn.addEventListener('click', clearAllBarcodes);
+        exportBtn.addEventListener('click', exportBarcodes);
+
+        addManualBtn.addEventListener('click', () => {
+            addBarcode(manualInput.value);
+        });
+
+        manualInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addBarcode(manualInput.value);
+            }
+        });
 
         // Initialize
         renderBarcodeList();
         updateCounter();
 
-        // Handle page visibility change to stop scanning when tab is hidden
+        // Stop camera when page is hidden
         document.addEventListener('visibilitychange', function() {
-            if (document.hidden && isScanning) {
-                stopScanning();
+            if (document.hidden && stream) {
+                stopCamera();
+            }
+        });
+
+        // Stop camera when page unloads
+        window.addEventListener('beforeunload', function() {
+            if (stream) {
+                stopCamera();
             }
         });
     </script>
