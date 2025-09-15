@@ -65,6 +65,15 @@
             display: none;
         }
 
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+
         .camera-placeholder {
             position: absolute;
             top: 50%;
@@ -80,12 +89,13 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 200px;
-            height: 100px;
-            border: 2px solid #00ff00;
+            width: 250px;
+            height: 150px;
+            border: 3px solid #00ff00;
             border-radius: 10px;
             z-index: 2;
             display: none;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
         }
 
         .scan-overlay::before {
@@ -94,14 +104,14 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 2px;
-            background: #00ff00;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #00ff00, transparent);
             animation: scan-line 2s linear infinite;
         }
 
         @keyframes scan-line {
             0% { top: 0; }
-            100% { top: calc(100% - 2px); }
+            100% { top: calc(100% - 3px); }
         }
 
         .control-buttons {
@@ -130,6 +140,11 @@
             background: #f8f9fa;
             color: #333;
             border: 2px solid #ddd;
+        }
+
+        .btn-scan {
+            background: #28a745;
+            color: white;
         }
 
         .btn:hover {
@@ -163,6 +178,29 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
+        }
+
+        .scan-modes {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+
+        .scan-mode-btn {
+            flex: 1;
+            padding: 8px;
+            background: #f0f0f0;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .scan-mode-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
         }
 
         .status {
@@ -293,18 +331,29 @@
             font-style: italic;
             padding: 40px 20px;
         }
+
+        .debug-info {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>📱 Bulk Barcode Scanner</h1>
-            <p>Supports QR codes, UPC, EAN, Code128, Code39, PDF417, DataMatrix & more!</p>
+            <p>Multi-mode scanner with manual capture option</p>
         </div>
 
         <div class="scanner-section">
             <div class="camera-container">
                 <video id="video" autoplay playsinline muted></video>
+                <canvas id="canvas"></canvas>
                 <div class="camera-placeholder" id="cameraPlaceholder">
                     <div style="font-size: 48px; margin-bottom: 10px;">📷</div>
                     <div>Camera will appear here</div>
@@ -312,8 +361,15 @@
                 <div class="scan-overlay" id="scanOverlay"></div>
             </div>
 
+            <div class="scan-modes">
+                <button id="autoMode" class="scan-mode-btn active">Auto Scan</button>
+                <button id="manualMode" class="scan-mode-btn">Manual Capture</button>
+                <button id="continuousMode" class="scan-mode-btn">Continuous</button>
+            </div>
+
             <div class="control-buttons">
                 <button id="startCameraBtn" class="btn btn-primary">Start Camera</button>
+                <button id="captureBtn" class="btn btn-scan" style="display:none;">Capture Frame</button>
                 <button id="stopCameraBtn" class="btn btn-secondary" disabled>Stop Camera</button>
             </div>
 
@@ -321,6 +377,8 @@
                 <input type="text" id="manualInput" placeholder="Enter barcode manually..." />
                 <button id="addManualBtn">Add</button>
             </div>
+
+            <div id="debugInfo" class="debug-info" style="display: none;"></div>
             
             <div id="status" class="status" style="display: none;"></div>
         </div>
@@ -343,16 +401,20 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/zxing-library/0.18.6/zxing-library.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <script>
         let isScanning = false;
         let barcodes = [];
         let stream = null;
-        let codeReader = null;
+        let scanMode = 'auto'; // auto, manual, continuous
+        let scanInterval = null;
 
         const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
         const startCameraBtn = document.getElementById('startCameraBtn');
         const stopCameraBtn = document.getElementById('stopCameraBtn');
+        const captureBtn = document.getElementById('captureBtn');
         const statusDiv = document.getElementById('status');
         const barcodeList = document.getElementById('barcodeList');
         const clearBtn = document.getElementById('clearBtn');
@@ -362,6 +424,16 @@
         const scanOverlay = document.getElementById('scanOverlay');
         const manualInput = document.getElementById('manualInput');
         const addManualBtn = document.getElementById('addManualBtn');
+        const autoMode = document.getElementById('autoMode');
+        const manualMode = document.getElementById('manualMode');
+        const continuousMode = document.getElementById('continuousMode');
+        const debugInfo = document.getElementById('debugInfo');
+
+        function showDebug(message) {
+            debugInfo.innerHTML += message + '<br>';
+            debugInfo.style.display = 'block';
+            console.log(message);
+        }
 
         function showStatus(message, type) {
             statusDiv.textContent = message;
@@ -383,7 +455,6 @@
             code = code.trim();
             if (!code) return;
 
-            // Check for duplicates
             if (barcodes.some(item => item.code === code)) {
                 showStatus('Barcode already exists in list', 'error');
                 return;
@@ -399,12 +470,10 @@
             updateCounter();
             showStatus('Barcode added successfully!', 'success');
 
-            // Vibrate if supported
             if (navigator.vibrate) {
                 navigator.vibrate(100);
             }
 
-            // Clear manual input
             manualInput.value = '';
         }
 
@@ -464,138 +533,157 @@
             `).join('');
         }
 
+        function setScanMode(mode) {
+            scanMode = mode;
+            document.querySelectorAll('.scan-mode-btn').forEach(btn => btn.classList.remove('active'));
+            
+            if (mode === 'auto') {
+                autoMode.classList.add('active');
+                captureBtn.style.display = 'none';
+                showDebug('Mode: Auto-scan enabled');
+            } else if (mode === 'manual') {
+                manualMode.classList.add('active');
+                captureBtn.style.display = 'inline-block';
+                showDebug('Mode: Manual capture - click "Capture Frame" button');
+            } else if (mode === 'continuous') {
+                continuousMode.classList.add('active');
+                captureBtn.style.display = 'none';
+                showDebug('Mode: Continuous scanning every 2 seconds');
+            }
+        }
+
+        function captureAndScan() {
+            if (!stream) return;
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            
+            const imageData = canvas.toDataURL('image/png');
+            showDebug('Frame captured, attempting to decode...');
+
+            // Try multiple scanning approaches
+            tryQuaggaScanning();
+        }
+
+        function tryQuaggaScanning() {
+            showDebug('Trying Quagga scanning...');
+            
+            Quagga.decodeSingle({
+                decoder: {
+                    readers: [
+                        "code_128_reader",
+                        "ean_reader", 
+                        "ean_8_reader",
+                        "code_39_reader",
+                        "code_93_reader",
+                        "codabar_reader",
+                        "upc_reader",
+                        "upc_e_reader"
+                    ]
+                },
+                locate: true,
+                src: canvas.toDataURL()
+            }, function(result) {
+                if (result && result.codeResult) {
+                    showDebug(`Quagga found: ${result.codeResult.code}`);
+                    addBarcode(result.codeResult.code);
+                } else {
+                    showDebug('Quagga: No barcode detected in frame');
+                }
+            });
+        }
+
         async function startCamera() {
             try {
+                debugInfo.innerHTML = '';
                 showStatus('Starting camera...', 'scanning');
+                showDebug('Requesting camera access...');
                 
-                // Try different camera constraints for better focus
                 const constraints = {
                     video: { 
                         facingMode: 'environment',
                         width: { ideal: 1280, max: 1920 },
-                        height: { ideal: 720, max: 1080 },
-                        focusMode: 'continuous',
-                        advanced: [
-                            { focusMode: 'continuous' },
-                            { focusDistance: { ideal: 0.3 } }, // Focus at 30cm (good for barcodes)
-                            { zoom: { ideal: 1.0 } }
-                        ]
-                    }
-                };
-
-                // Fallback constraints if advanced doesn't work
-                const fallbackConstraints = {
-                    video: { 
-                        facingMode: 'environment',
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
+                        height: { ideal: 720, max: 1080 }
                     }
                 };
                 
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia(constraints);
-                } catch (advancedError) {
-                    console.log('Advanced constraints failed, trying fallback');
-                    stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
-                }
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                showDebug('Camera stream obtained');
                 
                 video.srcObject = stream;
                 video.style.display = 'block';
                 cameraPlaceholder.style.display = 'none';
                 scanOverlay.style.display = 'block';
                 
-                // Wait for video to load and try to set focus
                 video.onloadedmetadata = () => {
                     video.play();
-                    
-                    // Try to enable auto-focus if supported
-                    const track = stream.getVideoTracks()[0];
-                    if (track && track.getCapabilities) {
-                        const capabilities = track.getCapabilities();
-                        
-                        if (capabilities.focusMode) {
-                            track.applyConstraints({
-                                advanced: [{ 
-                                    focusMode: 'continuous',
-                                    focusDistance: 0.3 
-                                }]
-                            }).catch(err => {
-                                console.log('Focus constraints failed:', err);
-                                // Try simpler focus mode
-                                track.applyConstraints({
-                                    focusMode: 'continuous'
-                                }).catch(e => console.log('Simple focus failed too:', e));
-                            });
-                        }
-                    }
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    showDebug(`Video size: ${video.videoWidth}x${video.videoHeight}`);
                 };
                 
                 startCameraBtn.disabled = true;
                 stopCameraBtn.disabled = false;
                 
-                // Initialize barcode reader with all supported formats
-                const hints = new Map();
-                const formats = [
-                    ZXing.BarcodeFormat.QR_CODE,
-                    ZXing.BarcodeFormat.DATA_MATRIX,
-                    ZXing.BarcodeFormat.UPC_E,
-                    ZXing.BarcodeFormat.UPC_A,
-                    ZXing.BarcodeFormat.EAN_8,
-                    ZXing.BarcodeFormat.EAN_13,
-                    ZXing.BarcodeFormat.CODE_128,
-                    ZXing.BarcodeFormat.CODE_39,
-                    ZXing.BarcodeFormat.CODE_93,
-                    ZXing.BarcodeFormat.CODABAR,
-                    ZXing.BarcodeFormat.ITF,
-                    ZXing.BarcodeFormat.RSS_14,
-                    ZXing.BarcodeFormat.RSS_EXPANDED,
-                    ZXing.BarcodeFormat.PDF_417,
-                    ZXing.BarcodeFormat.AZTEC,
-                    ZXing.BarcodeFormat.MAXICODE
-                ];
+                showStatus(`Camera active - ${scanMode} mode`, 'scanning');
                 
-                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-                
-                codeReader = new ZXing.BrowserMultiFormatReader(hints);
-                
-                showStatus('Camera active - tap screen to focus, point at barcode', 'scanning');
-                
-                // Add tap-to-focus functionality
-                video.addEventListener('click', async () => {
-                    const track = stream.getVideoTracks()[0];
-                    if (track && track.getCapabilities) {
-                        try {
-                            await track.applyConstraints({
-                                advanced: [{ focusMode: 'single-shot' }]
-                            });
-                            showStatus('Focusing...', 'scanning');
-                            setTimeout(() => {
-                                showStatus('Camera active - tap screen to focus, point at barcode', 'scanning');
-                            }, 1000);
-                        } catch (err) {
-                            console.log('Manual focus failed:', err);
-                        }
-                    }
-                });
-                
-                // Start scanning with delay to allow camera to settle
-                setTimeout(() => {
-                    codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
-                        if (result) {
-                            console.log('Barcode detected:', result.text);
-                            addBarcode(result.text);
-                        }
-                        if (err && !(err instanceof ZXing.NotFoundException)) {
-                            console.error('Decode error:', err);
-                        }
-                    });
-                }, 1000);
+                if (scanMode === 'auto') {
+                    startAutoScanning();
+                } else if (scanMode === 'continuous') {
+                    startContinuousScanning();
+                }
                 
             } catch (error) {
-                console.error('Camera error:', error);
+                showDebug(`Camera error: ${error.message}`);
                 showStatus('Camera access failed. Please allow camera permissions.', 'error');
             }
+        }
+
+        function startAutoScanning() {
+            showDebug('Starting Quagga auto-scanning...');
+            
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: video,
+                },
+                decoder: {
+                    readers: [
+                        "code_128_reader",
+                        "ean_reader",
+                        "ean_8_reader", 
+                        "code_39_reader",
+                        "code_93_reader",
+                        "codabar_reader",
+                        "upc_reader",
+                        "upc_e_reader"
+                    ]
+                },
+                locate: true
+            }, function(err) {
+                if (err) {
+                    showDebug(`Quagga init failed: ${err.message}`);
+                    showStatus('Auto-scan failed, try manual capture mode', 'error');
+                    return;
+                }
+                
+                showDebug('Quagga initialized successfully');
+                Quagga.start();
+                isScanning = true;
+            });
+
+            Quagga.onDetected(function(result) {
+                showDebug(`Auto-scan detected: ${result.codeResult.code}`);
+                addBarcode(result.codeResult.code);
+            });
+        }
+
+        function startContinuousScanning() {
+            scanInterval = setInterval(() => {
+                captureAndScan();
+            }, 2000);
         }
 
         function stopCamera() {
@@ -604,9 +692,14 @@
                 stream = null;
             }
             
-            if (codeReader) {
-                codeReader.reset();
-                codeReader = null;
+            if (isScanning) {
+                Quagga.stop();
+                isScanning = false;
+            }
+            
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
             }
             
             video.style.display = 'none';
@@ -615,6 +708,7 @@
             
             startCameraBtn.disabled = false;
             stopCameraBtn.disabled = true;
+            captureBtn.style.display = 'none';
             
             statusDiv.style.display = 'none';
             showStatus('Camera stopped', 'success');
@@ -623,8 +717,13 @@
         // Event listeners
         startCameraBtn.addEventListener('click', startCamera);
         stopCameraBtn.addEventListener('click', stopCamera);
+        captureBtn.addEventListener('click', captureAndScan);
         clearBtn.addEventListener('click', clearAllBarcodes);
         exportBtn.addEventListener('click', exportBarcodes);
+
+        autoMode.addEventListener('click', () => setScanMode('auto'));
+        manualMode.addEventListener('click', () => setScanMode('manual'));
+        continuousMode.addEventListener('click', () => setScanMode('continuous'));
 
         addManualBtn.addEventListener('click', () => {
             addBarcode(manualInput.value);
@@ -639,6 +738,7 @@
         // Initialize
         renderBarcodeList();
         updateCounter();
+        setScanMode('auto');
 
         // Stop camera when page is hidden
         document.addEventListener('visibilitychange', function() {
@@ -647,7 +747,6 @@
             }
         });
 
-        // Stop camera when page unloads
         window.addEventListener('beforeunload', function() {
             if (stream) {
                 stopCamera();
