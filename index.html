@@ -468,37 +468,106 @@
             try {
                 showStatus('Starting camera...', 'scanning');
                 
-                stream = await navigator.mediaDevices.getUserMedia({
+                // Try different camera constraints for better focus
+                const constraints = {
                     video: { 
                         facingMode: 'environment',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        width: { ideal: 1280, max: 1920 },
+                        height: { ideal: 720, max: 1080 },
+                        focusMode: 'continuous',
+                        advanced: [
+                            { focusMode: 'continuous' },
+                            { focusDistance: { ideal: 0.3 } }, // Focus at 30cm (good for barcodes)
+                            { zoom: { ideal: 1.0 } }
+                        ]
                     }
-                });
+                };
+
+                // Fallback constraints if advanced doesn't work
+                const fallbackConstraints = {
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                };
+                
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (advancedError) {
+                    console.log('Advanced constraints failed, trying fallback');
+                    stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                }
                 
                 video.srcObject = stream;
                 video.style.display = 'block';
                 cameraPlaceholder.style.display = 'none';
                 scanOverlay.style.display = 'block';
                 
+                // Wait for video to load and try to set focus
+                video.onloadedmetadata = () => {
+                    video.play();
+                    
+                    // Try to enable auto-focus if supported
+                    const track = stream.getVideoTracks()[0];
+                    if (track && track.getCapabilities) {
+                        const capabilities = track.getCapabilities();
+                        
+                        if (capabilities.focusMode) {
+                            track.applyConstraints({
+                                advanced: [{ 
+                                    focusMode: 'continuous',
+                                    focusDistance: 0.3 
+                                }]
+                            }).catch(err => {
+                                console.log('Focus constraints failed:', err);
+                                // Try simpler focus mode
+                                track.applyConstraints({
+                                    focusMode: 'continuous'
+                                }).catch(e => console.log('Simple focus failed too:', e));
+                            });
+                        }
+                    }
+                };
+                
                 startCameraBtn.disabled = true;
                 stopCameraBtn.disabled = false;
                 
-                // Initialize barcode reader
+                // Initialize barcode reader with better settings
                 codeReader = new ZXing.BrowserMultiFormatReader();
                 
-                showStatus('Camera active - point at barcode', 'scanning');
+                showStatus('Camera active - tap screen to focus, point at barcode', 'scanning');
                 
-                // Start scanning
-                codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
-                    if (result) {
-                        console.log('Barcode detected:', result.text);
-                        addBarcode(result.text);
-                    }
-                    if (err && !(err instanceof ZXing.NotFoundException)) {
-                        console.error('Decode error:', err);
+                // Add tap-to-focus functionality
+                video.addEventListener('click', async () => {
+                    const track = stream.getVideoTracks()[0];
+                    if (track && track.getCapabilities) {
+                        try {
+                            await track.applyConstraints({
+                                advanced: [{ focusMode: 'single-shot' }]
+                            });
+                            showStatus('Focusing...', 'scanning');
+                            setTimeout(() => {
+                                showStatus('Camera active - tap screen to focus, point at barcode', 'scanning');
+                            }, 1000);
+                        } catch (err) {
+                            console.log('Manual focus failed:', err);
+                        }
                     }
                 });
+                
+                // Start scanning with delay to allow camera to settle
+                setTimeout(() => {
+                    codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
+                        if (result) {
+                            console.log('Barcode detected:', result.text);
+                            addBarcode(result.text);
+                        }
+                        if (err && !(err instanceof ZXing.NotFoundException)) {
+                            console.error('Decode error:', err);
+                        }
+                    });
+                }, 1000);
                 
             } catch (error) {
                 console.error('Camera error:', error);
